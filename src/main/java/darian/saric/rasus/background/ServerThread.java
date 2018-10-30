@@ -3,17 +3,18 @@ package darian.saric.rasus.background;
 import darian.saric.rasus.Client;
 import darian.saric.rasus.model.Measurement;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.io.PushbackInputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerThread extends Thread {
-    private static final int NUMBER_OF_MEASUREMENTS_SENT = 3;
+    public static final int NUMBER_OF_MEASUREMENTS_SENT = 3;
     private final long startTime = System.currentTimeMillis();
     private Client main;
     private ExecutorService threadPool = Executors.newFixedThreadPool(
@@ -89,13 +90,20 @@ public class ServerThread extends Thread {
                 outputStream = clientSocket.getOutputStream();
 
                 ObjectOutputStream os = new ObjectOutputStream(outputStream);
-                ObjectInputStream objectInputStream = new ObjectInputStream(pushbackInputStream);
 //                Measurement m = (Measurement) objectInputStream.readObject();
 
-
+                StringBuilder builder = new StringBuilder();
+                byte[] buf = new byte[1024];
 //                Measurement newMeasurement = compareMeasurements(m, list);
                 for(int i = 0; i < NUMBER_OF_MEASUREMENTS_SENT;i++) {
                     os.writeObject(generateMeasureMent());
+                    os.flush();
+                    if (i < 2) {
+                        while (pushbackInputStream.available() > 0) {
+                            int read = pushbackInputStream.read(buf);
+                            builder.append(new String(buf, 0, read));
+                        }
+                    }
                 }
 
             } catch (IOException e) {

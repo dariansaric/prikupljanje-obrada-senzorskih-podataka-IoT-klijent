@@ -3,6 +3,7 @@ package darian.saric.rasus;
 import darian.saric.rasus.background.ServerThread;
 import darian.saric.rasus.model.Measurement;
 import darian.saric.rasus.model.Sensor;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
@@ -12,6 +13,8 @@ import org.apache.http.util.EntityUtils;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -19,10 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Random;
-import java.util.Scanner;
+import java.util.*;
 
 public class Client {
     private static final Path DATA_PATH = Paths.get("src/main/resources/mjerenja.csv");
@@ -40,7 +40,7 @@ public class Client {
         serverAddress = new InetSocketAddress(InetAddress.getByName(serverIp), SERVER_PORT);
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, ClassNotFoundException {
         if (args.length != 4) {
             System.err.println("Očekuju se dva argumenta: IP i port i IP poslužitelja");
             return;
@@ -85,24 +85,6 @@ public class Client {
         scanner.close();
         System.out.println("Doviđenja!!!");
 
-//        System.out.println("Napisi podatke za mjerenje:");
-//        String param = sc.nextLine();
-//        System.out.println("Napisi vrijednost");
-//        double y = Double.parseDouble(sc.nextLine());
-//
-//        Measurement m = new Measurement(param, y);
-//
-//        Socket s = new Socket();
-//        s.connect(new InetSocketAddress("127.0.0.1", 1999));
-//
-//        ObjectOutputStream os = new ObjectOutputStream(s.getOutputStream());
-//        ObjectInputStream is = new ObjectInputStream(s.getInputStream());
-//        os.writeObject(m);
-//
-//        os.flush();
-//
-//        Measurement m1 = (Measurement) is.readObject();
-//        System.out.println(m1);
     }
 
     private static List<Measurement> readMeasurements() throws IOException {
@@ -135,19 +117,20 @@ public class Client {
                 r.nextDouble() * (45.85 - 45.75) + 45.75,
                 serverThread.getIp(), serverThread.getPort());
 
-        CloseableHttpClient client = HttpClientBuilder.create().build();
-        HttpPost httpPost = new HttpPost(String.format("http://%s:%d/central/rest/sensor",
-                serverAddress.getHostName(), serverAddress.getPort()));
-        httpPost.setEntity(new StringEntity(
-                new JSONObject(s)
-                        .toString(),
-                ContentType.APPLICATION_JSON));
+        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+            HttpPost httpPost = new HttpPost(String.format("http://%s:%d/central/rest/sensor",
+                    serverAddress.getHostName(), serverAddress.getPort()));
+            httpPost.setEntity(new StringEntity(
+                    new JSONObject(s)
+                            .toString(),
+                    ContentType.APPLICATION_JSON));
 
-        JSONObject object = new JSONObject(EntityUtils.toString(
-                client.execute(httpPost).getEntity(),
-                StandardCharsets.UTF_8));
+            JSONObject object = new JSONObject(EntityUtils.toString(
+                    client.execute(httpPost).getEntity(),
+                    StandardCharsets.UTF_8));
 
-        return object.getBoolean("status");
+            return object.getBoolean("status");
+        }
     }
 
     private void shutdown() {
@@ -155,12 +138,56 @@ public class Client {
         // TODO: gašenje servera
     }
 
-    private void measure() {
+    private void measure() throws IOException, ClassNotFoundException {
         Measurement m = measurements.get(Math.toIntExact(
-                (System.currentTimeMillis() - serverThread.getStartTime()) / 1000));
+                (System.currentTimeMillis() - serverThread.getStartTime()) / 1000) % 100);
 
-        Socket s = new Socket();
+        Sensor s = getClosestNeighbour();
+        if (s == null) {
+            System.out.println("nema susjeda");
+            return;
+        }
+
+        Socket socket = new Socket();
+        socket.connect(new InetSocketAddress(s.getIp(), s.getPort()));
+
+        ObjectOutputStream os = new ObjectOutputStream(socket.getOutputStream());
+        ObjectInputStream is = new ObjectInputStream(socket.getInputStream());
+
+        List<Measurement> ms = new ArrayList<>(ServerThread.NUMBER_OF_MEASUREMENTS_SENT);
+        // TODO: ispravan dohvat novih mjerenja
+        for (int i = 0; i < ServerThread.NUMBER_OF_MEASUREMENTS_SENT; i++) {
+            ms.add((Measurement) is.readObject());
+            if (i < 2) {
+                os.writeObject("send".getBytes(StandardCharsets.UTF_8));
+            }
+        }
+
+        os.flush();
+        os.close();
+        is.close();
+        socket.close();
+        System.out.println(ms);
         // TODO: dohvati sa servera podatke o najbližem susjedu
+    }
+
+    private Sensor getClosestNeighbour() throws IOException {
+        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+            HttpGet httpGet = new HttpGet(String.format("http://%s:%d/central/rest/sensor/%s",
+                    serverAddress.getHostString(), serverAddress.getPort(), username));
+            String s = EntityUtils.toString(client.execute(httpGet).getEntity(), StandardCharsets.UTF_8);
+            if (s.equals("null")) {
+                return null;
+            }
+            JSONObject object = new JSONObject(s);
+            return new Sensor(
+                    object.getString("username"),
+                    object.getDouble("latitude"),
+                    object.getDouble("longitude"),
+                    object.getString("ip"),
+                    object.getInt("port"));
+
+        }
     }
 
     public synchronized List<Measurement> getMeasurements() {
