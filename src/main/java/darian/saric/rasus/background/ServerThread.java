@@ -13,12 +13,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerThread extends Thread {
+    private static final int NUMBER_OF_MEASUREMENTS_SENT = 3;
+    private final long startTime = System.currentTimeMillis();
     private Client main;
     private ExecutorService threadPool = Executors.newFixedThreadPool(
             Runtime.getRuntime().availableProcessors() - 1);
     private String ip;
     private int port;
     private boolean active = true;
+
+    public String getIp() {
+        return ip;
+    }
 
     public void setIp(String ip) {
         this.ip = ip;
@@ -59,6 +65,10 @@ public class ServerThread extends Thread {
         this.main = main;
     }
 
+    public long getStartTime() {
+        return startTime;
+    }
+
 //    public void setActive(boolean active) {
 //        this.active = active;
 //    }
@@ -80,15 +90,15 @@ public class ServerThread extends Thread {
 
                 ObjectOutputStream os = new ObjectOutputStream(outputStream);
                 ObjectInputStream objectInputStream = new ObjectInputStream(pushbackInputStream);
-                Measurement m = (Measurement) objectInputStream.readObject();
+//                Measurement m = (Measurement) objectInputStream.readObject();
 
-                List<Measurement> list = main.getMeasurements();
 
-                Measurement newMeasurement = compareMeasurements(m, list);
+//                Measurement newMeasurement = compareMeasurements(m, list);
+                for(int i = 0; i < NUMBER_OF_MEASUREMENTS_SENT;i++) {
+                    os.writeObject(generateMeasureMent());
+                }
 
-                os.writeObject(newMeasurement);
-
-            } catch (IOException | ClassNotFoundException e) {
+            } catch (IOException e) {
                 e.printStackTrace();
 
             } finally {
@@ -104,16 +114,9 @@ public class ServerThread extends Thread {
             }
         }
 
-        private Measurement compareMeasurements(Measurement m, List<Measurement> list) {
-            for(int i = list.size() - 1;i >= 0; i--) {
-                if(list.get(i).getParameter().equals(m.getParameter())) {
-                    //noinspection OptionalGetWithoutIsPresent
-                    return new Measurement(m.getParameter(),
-                            Arrays.stream(new double[]{m.getValue(), list.get(i).getValue()}).average().getAsDouble());
-                }
-            }
-
-            return m;
+        private Measurement generateMeasureMent() {
+            return null;
         }
+
     }
 }
