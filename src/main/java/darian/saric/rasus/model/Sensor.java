@@ -58,10 +58,12 @@ public class Sensor {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Sensor sensor = (Sensor) o;
+        if (sensor.username.equals(username)) {
+            return true;
+        }
         return Double.compare(sensor.latitude, latitude) == 0 &&
                 Double.compare(sensor.longitude, longitude) == 0 &&
                 port == sensor.port &&
-                Objects.equals(username, sensor.username) &&
                 Objects.equals(ip, sensor.ip);
     }
 

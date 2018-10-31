@@ -1,12 +1,9 @@
 package darian.saric.rasus.background;
 
 import darian.saric.rasus.Client;
-import darian.saric.rasus.model.Measurement;
+import org.json.JSONObject;
 
-import java.io.IOException;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
-import java.io.PushbackInputStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -76,8 +73,8 @@ public class ServerThread extends Thread {
 
     private class ClientWorker implements Runnable {
         private Socket clientSocket;
-        private PushbackInputStream pushbackInputStream;
-        private OutputStream outputStream;
+        private BufferedReader reader;
+        private PrintWriter writer;
 
         ClientWorker(Socket clientSocket) {
             this.clientSocket = clientSocket;
@@ -86,25 +83,21 @@ public class ServerThread extends Thread {
         @Override
         public void run() {
             try {
-                pushbackInputStream = new PushbackInputStream(clientSocket.getInputStream());
-                outputStream = clientSocket.getOutputStream();
 
-                ObjectOutputStream os = new ObjectOutputStream(outputStream);
-//                Measurement m = (Measurement) objectInputStream.readObject();
+                writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+                reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
 
-                StringBuilder builder = new StringBuilder();
-                byte[] buf = new byte[1024];
-//                Measurement newMeasurement = compareMeasurements(m, list);
                 for(int i = 0; i < NUMBER_OF_MEASUREMENTS_SENT;i++) {
-                    os.writeObject(generateMeasureMent());
-                    os.flush();
-                    if (i < 2) {
-                        while (pushbackInputStream.available() > 0) {
-                            int read = pushbackInputStream.read(buf);
-                            builder.append(new String(buf, 0, read));
-                        }
+                    JSONObject o = generateMeasureMent();
+                    writer.println(o);
+                    System.out.println("Sent " + o);
+                    String in = reader.readLine();
+                    if (!in.equals("send")) {
+                        throw new IOException("Greška pri komunikaciji");
                     }
                 }
+                writer.println("end");
+
 
             } catch (IOException e) {
                 e.printStackTrace();
@@ -112,8 +105,8 @@ public class ServerThread extends Thread {
             } finally {
 
                 try {
-                    outputStream.flush();
-                    outputStream.close();
+                    writer.close();
+                    reader.close();
                     clientSocket.close();
 
                 } catch (IOException e) {
@@ -122,8 +115,12 @@ public class ServerThread extends Thread {
             }
         }
 
-        private Measurement generateMeasureMent() {
-            return null;
+        private JSONObject generateMeasureMent() {
+            return new JSONObject(
+                    main.getMeasurements().get(
+                            (Math.toIntExact(System.currentTimeMillis() / 1000)
+                                    - main.getSecondsStart())
+                                    % 100));
         }
 
     }

@@ -12,9 +12,7 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 import org.json.JSONObject;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.*;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -27,6 +25,7 @@ import java.util.*;
 public class Client {
     private static final Path DATA_PATH = Paths.get("src/main/resources/mjerenja.csv");
     private static final int SERVER_PORT = 8080;
+    private final int secondsStart = Math.toIntExact(System.currentTimeMillis() / 1000);
     private ServerThread serverThread = new ServerThread();
     private List<Measurement> measurements = readMeasurements();
     private InetSocketAddress serverAddress;
@@ -40,7 +39,7 @@ public class Client {
         serverAddress = new InetSocketAddress(InetAddress.getByName(serverIp), SERVER_PORT);
     }
 
-    public static void main(String[] args) throws IOException, ClassNotFoundException {
+    public static void main(String[] args) throws IOException {
         if (args.length != 4) {
             System.err.println("Očekuju se dva argumenta: IP i port i IP poslužitelja");
             return;
@@ -62,14 +61,16 @@ public class Client {
             return;
         }
 
-        System.out.println("Dobrodošli na sučelje za upravljanje senzorom, unesite naredbu ili KRAJ");
+        System.out.println("Dobrodošli na sučelje za upravljanje senzorom '" + c.username + "'!!!!");
+        System.out.println("Unesite naredbu ili KRAJ");
         Scanner scanner = new Scanner(System.in);
 
-        for (boolean done = false; scanner.hasNext() && !done; ) {
+        for (boolean done = false; !done && scanner.hasNext(); ) {
             String command = scanner.nextLine();
             switch (command.toLowerCase()) {
                 case "mjerenje":
                     c.measure();
+                    System.out.println("Unesite naredbu ili KRAJ");
                     break;
 
                 case "kraj":
@@ -79,6 +80,7 @@ public class Client {
 
                 default:
                     System.out.println("Neispravna naredba");
+                    System.out.println("Unesite naredbu ili KRAJ");
             }
         }
 
@@ -138,7 +140,7 @@ public class Client {
         // TODO: gašenje servera
     }
 
-    private void measure() throws IOException, ClassNotFoundException {
+    private void measure() throws IOException {
         Measurement m = measurements.get(Math.toIntExact(
                 (System.currentTimeMillis() - serverThread.getStartTime()) / 1000) % 100);
 
@@ -148,27 +150,119 @@ public class Client {
             return;
         }
 
-        Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(s.getIp(), s.getPort()));
 
-        ObjectOutputStream os = new ObjectOutputStream(socket.getOutputStream());
-        ObjectInputStream is = new ObjectInputStream(socket.getInputStream());
-
-        List<Measurement> ms = new ArrayList<>(ServerThread.NUMBER_OF_MEASUREMENTS_SENT);
-        // TODO: ispravan dohvat novih mjerenja
-        for (int i = 0; i < ServerThread.NUMBER_OF_MEASUREMENTS_SENT; i++) {
-            ms.add((Measurement) is.readObject());
-            if (i < 2) {
-                os.writeObject("send".getBytes(StandardCharsets.UTF_8));
+        m = getAverageMeasurement(s.getIp(), s.getPort(), m);
+        while (true) {
+            if (storeMeasurement(m)) {
+                break;
             }
         }
+//                new ArrayList<>(ServerThread.NUMBER_OF_MEASUREMENTS_SENT + 1);
 
-        os.flush();
-        os.close();
-        is.close();
-        socket.close();
-        System.out.println(ms);
+//        try (Socket socket = new Socket(s.getIp(), s.getPort())) {
+//            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true);
+//            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+//
+//            for (String json = in.readLine(); !json.equals("end"); json = in.readLine()) {
+//                JSONObject o = new JSONObject(json);
+//                Measurement m1 = new Measurement(
+//                        o.has("temperature") ? o.getInt("temperature") : null,
+//                        o.has("pressure") ? o.getInt("pressure") : null,
+//                        o.has("humidity") ? o.getInt("humidity") : null,
+//                        o.has("co") ? o.getInt("co") : null,
+//                        o.has("no2") ? o.getInt("no2") : null,
+//                        o.has("so2") ? o.getInt("so2") : null
+//                );
+//                ms.add(m1);
+//                out.println("send");
+//            }
+//        }
+//        ms.add(m);
+//        Socket socket = new Socket();
+//        socket.connect(new InetSocketAddress(s.getIp(), s.getPort()));
+
+//        ObjectOutputStream os = new ObjectOutputStream(socket.getOutputStream());
+//        ObjectInputStream is = new ObjectInputStream(socket.getInputStream());
+//
+//        List<Measurement> ms = new ArrayList<>(ServerThread.NUMBER_OF_MEASUREMENTS_SENT);
+//        // TODO: ispravan dohvat novih mjerenja
+//        for (int i = 0; i < ServerThread.NUMBER_OF_MEASUREMENTS_SENT; i++) {
+//            ms.add((Measurement) is.readObject());
+//            if (i < 2) {
+//                os.writeObject("send".getBytes(StandardCharsets.UTF_8));
+//            }
+//        }
+//
+//        os.flush();
+//        os.close();
+//        is.close();
+//        socket.close();
+//        System.out.println(ms);
         // TODO: dohvati sa servera podatke o najbližem susjedu
+    }
+
+    private boolean storeMeasurement(Measurement m) throws IOException {
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpPost httpPost = new HttpPost(
+                    String.format("http://%s:%d/central/rest/sensor/%s/measure"
+                            , serverAddress.getHostName(), serverAddress.getPort(), username));
+            httpPost.setEntity(new StringEntity(new JSONObject(m).toString(), ContentType.APPLICATION_JSON));
+            JSONObject o = new JSONObject(
+                    EntityUtils.toString(
+                            httpClient.execute(httpPost).getEntity()
+                            , StandardCharsets.UTF_8));
+
+            return o.getBoolean("status");
+        }
+    }
+
+    private Measurement getAverageMeasurement(String ip, int port, Measurement m) throws IOException {
+        List<Measurement> ms = new ArrayList<>(ServerThread.NUMBER_OF_MEASUREMENTS_SENT + 1);
+        try (Socket socket = new Socket(ip, port)) {
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true);
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            for (String json = in.readLine(); !json.equals("end"); json = in.readLine()) {
+                JSONObject o = new JSONObject(json);
+                Measurement m1 = new Measurement(
+                        o.has("temperature") ? o.getInt("temperature") : null,
+                        o.has("pressure") ? o.getInt("pressure") : null,
+                        o.has("humidity") ? o.getInt("humidity") : null,
+                        o.has("co") ? o.getInt("co") : null,
+                        o.has("no2") ? o.getInt("no2") : null,
+                        o.has("so2") ? o.getInt("so2") : null
+                );
+                ms.add(m1);
+                out.println("send");
+            }
+        }
+        ms.add(m);
+        return compareMeasurements(ms);
+    }
+
+    private Measurement compareMeasurements(List<Measurement> ms) {
+        int t = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getTemperature).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+        int p = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getPressure).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+        int h = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getHumidity).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+        int co = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getCo).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+        int no2 = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getNo2).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+        int so2 = Math.toIntExact(Math.round(
+                ms.stream().map(Measurement::getSo2).filter(Objects::nonNull).mapToInt(x -> x).average().orElse(-1)));
+
+        return new Measurement(
+                t == -1 ? null : t,
+                p == -1 ? null : p,
+                h == -1 ? null : h,
+                co == -1 ? null : co,
+                no2 == -1 ? null : no2,
+                so2 == -1 ? null : so2
+        );
+
     }
 
     private Sensor getClosestNeighbour() throws IOException {
@@ -192,5 +286,9 @@ public class Client {
 
     public synchronized List<Measurement> getMeasurements() {
         return measurements;
+    }
+
+    public int getSecondsStart() {
+        return secondsStart;
     }
 }
