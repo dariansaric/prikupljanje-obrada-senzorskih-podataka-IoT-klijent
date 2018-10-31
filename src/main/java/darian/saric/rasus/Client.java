@@ -3,6 +3,7 @@ package darian.saric.rasus;
 import darian.saric.rasus.background.ServerThread;
 import darian.saric.rasus.model.Measurement;
 import darian.saric.rasus.model.Sensor;
+import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -135,9 +136,24 @@ public class Client {
         }
     }
 
-    private void shutdown() {
-        // TODO: deregistracija
-        // TODO: gašenje servera
+    private void shutdown() throws IOException {
+        serverThread.quit();
+        deregisterFromServer();
+    }
+
+    private void deregisterFromServer() throws IOException {
+        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+            HttpDelete httpDelete = new HttpDelete(
+                    String.format("http://%s:%d/central/rest/sensor/%s",
+                            serverAddress.getHostName(), serverAddress.getPort(), username));
+
+            while (true) {
+                if (client.execute(httpDelete).getStatusLine().getStatusCode() == 200) {
+                    break;
+                }
+            }
+        }
+        System.out.println(username + " uspješno deregistriran sa centralnog poslužitelja!!");
     }
 
     private void measure() throws IOException {
@@ -147,11 +163,10 @@ public class Client {
         Sensor s = getClosestNeighbour();
         if (s == null) {
             System.out.println("nema susjeda");
-            return;
+        } else {
+            m = getAverageMeasurement(s.getIp(), s.getPort(), m);
         }
 
-
-        m = getAverageMeasurement(s.getIp(), s.getPort(), m);
         while (true) {
             if (storeMeasurement(m)) {
                 break;

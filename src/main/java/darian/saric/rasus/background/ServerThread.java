@@ -36,7 +36,7 @@ public class ServerThread extends Thread {
         this.port = port;
     }
 
-    void quit() {
+    public void quit() {
         active = false;
         threadPool.shutdown();
     }
