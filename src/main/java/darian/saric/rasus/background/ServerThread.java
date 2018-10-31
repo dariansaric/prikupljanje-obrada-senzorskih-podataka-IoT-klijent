@@ -11,6 +11,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerThread extends Thread {
+    /**
+     * Broj usporednih mjerenja koje će se generirati za klijenta
+     */
     public static final int NUMBER_OF_MEASUREMENTS_SENT = 3;
     private final long startTime = System.currentTimeMillis();
     private Client main;
@@ -45,7 +48,7 @@ public class ServerThread extends Thread {
     public void run() {
         try (ServerSocket serverSocket = new ServerSocket()) {
             serverSocket.bind(new InetSocketAddress(ip, port));
-
+            System.out.println("Poslužitelj uspješno pokrenut na adresi: (" + ip + "," + port + ")...");
             while (active) {
                 Socket clientSocket = serverSocket.accept();
                 threadPool.submit(new ClientWorker(clientSocket));
@@ -55,26 +58,21 @@ public class ServerThread extends Thread {
         }
     }
 
-    public boolean isActive() {
-        return active;
-    }
-
     public void setMain(Client main) {
         this.main = main;
     }
 
+    /**
+     * @return {@linkplain #startTime}
+     */
     public long getStartTime() {
         return startTime;
     }
 
-//    public void setActive(boolean active) {
-//        this.active = active;
-//    }
-
     private class ClientWorker implements Runnable {
         private Socket clientSocket;
-        private BufferedReader reader;
-        private PrintWriter writer;
+//        private BufferedReader reader;
+//        private PrintWriter writer;
 
         ClientWorker(Socket clientSocket) {
             this.clientSocket = clientSocket;
@@ -82,40 +80,50 @@ public class ServerThread extends Thread {
 
         @Override
         public void run() {
-            try {
+            System.out.println("Opslužujem senzor na adresi (" +
+                    clientSocket.getInetAddress().getHostAddress() + "," + clientSocket.getPort() + ")");
+            try (PrintWriter writer = new PrintWriter(
+                    new OutputStreamWriter(clientSocket.getOutputStream()), true);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+//                writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+//                reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
 
-                writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
-                reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-
-                for(int i = 0; i < NUMBER_OF_MEASUREMENTS_SENT;i++) {
+                for (int i = 0; i < NUMBER_OF_MEASUREMENTS_SENT; i++) {
                     JSONObject o = generateMeasureMent();
                     writer.println(o);
-                    System.out.println("Sent " + o);
+                    System.out.println("Poslano mjerenje: " + o);
                     String in = reader.readLine();
                     if (!in.equals("send")) {
                         throw new IOException("Greška pri komunikaciji");
                     }
                 }
                 writer.println("end");
-
+                System.out.println("Opslužen zahtjev za adresu (" +
+                        clientSocket.getInetAddress().getHostAddress() + "," + clientSocket.getPort() + ")");
 
             } catch (IOException e) {
                 e.printStackTrace();
 
-            } finally {
-
-                try {
-                    writer.close();
-                    reader.close();
-                    clientSocket.close();
-
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+//            } finally {
+//
+//                try {
+//                    writer.close();
+//                    reader.close();
+//                    clientSocket.close();
+//
+//                } catch (IOException e) {
+//                    e.printStackTrace();
+//                }
             }
         }
 
+        /**
+         * Vraća generirano mjerenje u JSON formatu.
+         *
+         * @return JSON format mjerenja
+         */
         private JSONObject generateMeasureMent() {
+            // TODO: rad s milisekundama?
             return new JSONObject(
                     main.getMeasurements().get(
                             (Math.toIntExact(System.currentTimeMillis() / 1000)
