@@ -124,11 +124,14 @@ public class ServerThread extends Thread {
          */
         private JSONObject generateMeasureMent() {
             // TODO: rad s milisekundama?
+            int currentSeconds = Math.toIntExact(System.currentTimeMillis() / 1000);
+            System.out.println("Uređaj je aktivan " + currentSeconds + " sekundi...");
+            int index = (Math.toIntExact(System.currentTimeMillis() / 1000)
+                    - main.getSecondsStart())
+                    % 100;
+            System.out.println("Odabire se index " + index);
             return new JSONObject(
-                    main.getMeasurements().get(
-                            (Math.toIntExact(System.currentTimeMillis() / 1000)
-                                    - main.getSecondsStart())
-                                    % 100));
+                    main.getMeasurements().get(index));
         }
 
     }
